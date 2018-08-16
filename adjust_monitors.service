@@ -1,0 +1,12 @@
+[Unit]
+Description=Runs a udev monitor that runs xrandr whenever a monitor is connected/disconected
+Wants=lightdm.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/adjust_monitors.py
+Environment="ADJUST_MONITOR_INSTALLDIR=/usr/local/bin/adjust_monitors"
+Environment="DISPLAY=:0.0"
+
+[Install]
+WantedBy=multi-user.target

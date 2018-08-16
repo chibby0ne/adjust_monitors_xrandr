@@ -1,8 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# import pyudev
+import pyudev
 import subprocess
+import time
+import os
+import logging
+
+logging.basicConfig(filename='/tmp/adjust_monitors.log',
+                    level=logging.INFO)
+
+INSTALL_DIR = os.getenv('ADJUST_MONITOR_INSTALLDIR')
 
 
 def adjust_monitor_xrandr(num_monitors):
@@ -16,10 +24,15 @@ def adjust_monitor_xrandr(num_monitors):
         Number of monitors connected at this moment in time
 
     """
+    logging.info(f'Number of monitors: {num_monitors}')
     if num_monitors == 1:
-        subprocess.call('just_laptop.sh')
+        logging.info('Executing just_laptop.sh')
+        if subprocess.call(INSTALL_DIR + '/just_laptop.sh') != 0:
+            logging.warning("Couldn't execute just_laptop.sh")
     else:
-        subprocess.call('laptop_and_screen_on_top.sh')
+        logging.info('Executing laptop_and_screen_on_top.sh')
+        if subprocess.call(INSTALL_DIR + '/laptop_and_screen_on_top.sh') != 0:
+            logging.warning("Couldn't execute laptop_and_screen_on_top.sh")
 
 
 def get_number_of_monitors_connected():
@@ -52,14 +65,35 @@ def get_number_of_monitors_connected():
     return int(num_monitors)
 
 
-# context = pyudev.Context()
-# monitor = pyudev.Monitor.from_netlink(context)
+def check_monitors_change(action, device):
+    """
+    Event handler which is asynchronously call on every event of the monitor.
+    It will call run the adjust_monitor_xrandr using the current number of
+    monitor if the event was of type 'change' and happened on DRM device
+    'card0'. Parameters are mandatory for MonitorObserver's event handlers.
 
-# monitors are part of the drm subsystem
-# monitor.filter_by('drm')
+    Parameters
+    ----------
 
-num_monitors = get_number_of_monitors_connected()
-print(f'num of monitors: {num_monitors}')
-adjust_monitor_xrandr(num_monitors)
-# observer = pyudev.MonitorObserver(monitor, adjust_monitor_xrandr(num_monitors))
-# observer.start()
+    action: str
+        String representation of the type of action of the event
+
+    device: pyudev.Device
+        Device on which the event happened
+    """
+    if action == 'change' and device.device_node.endswith('card0'):
+        adjust_monitor_xrandr(get_number_of_monitors_connected())
+
+
+if __name__ == "__main__":
+    context = pyudev.Context()
+    monitor = pyudev.Monitor.from_netlink(context)
+    # monitors are part of the drm subsystem
+    try:
+        monitor.filter_by('drm')
+        observer = pyudev.MonitorObserver(monitor, check_monitors_change)
+        observer.start()
+        while True:
+            time.sleep(1)
+    except Exception as e:
+        logging.error(e.with_traceback)
