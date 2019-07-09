@@ -10,43 +10,56 @@ import logging
 logging.basicConfig(filename='/tmp/adjust_monitors.log',
                     level=logging.INFO)
 
-INSTALL_DIR = os.getenv('ADJUST_MONITOR_INSTALLDIR')
+
+PRIMARY_MONITOR = 'xrandr --output %s --primary --mode 1920x1080 --pos 0x%s --rotate normal'
+APPEND_MONITOR = '--output %s --mode 2560x1080 --pos 0x0 --rotate normal '
 
 
-def adjust_monitor_xrandr(num_monitors):
+def adjust_monitor_xrandr(monitors):
     """ Runs a specific xrandr script to adjust i3 depending on the
     num_monitors
 
     Parameters
     ----------
 
-    num_monitors: int
+    num_monitors: array of str
         Number of monitors connected at this moment in time
 
     """
-    logging.info(f'Number of monitors: {num_monitors}')
-    if num_monitors == 1:
-        logging.info('Executing just_laptop.sh')
-        if subprocess.call(INSTALL_DIR + '/just_laptop.sh') != 0:
-            logging.warning("Couldn't execute just_laptop.sh")
+    logging.info('Monitors: %s', monitors)
+    if len(monitors) == 1:
+        cmd = PRIMARY_MONITOR % ('eDP1', '0')
+        subprocess.call(cmd)
     else:
-        logging.info('Executing laptop_and_screen_on_top.sh')
-        if subprocess.call(INSTALL_DIR + '/laptop_and_screen_on_top.sh') != 0:
-            logging.warning("Couldn't execute laptop_and_screen_on_top.sh")
+        # If one of the monitors is a laptop, use the laptop as primary display
+        if 'eDP1' in monitors:
+            cmd = PRIMARY_MONITOR % ('eDP1', '1080')
+            monitors.remove('eDP1')
+            for mon in monitors:
+                cmd += APPEND_MONITOR % mon
+            subprocess.call(cmd)
+        else:
+            mon = monitors.pop()
+            cmd = PRIMARY_MONITOR % ('eDP1', '1080')
+            for mon in monitors:
+                cmd += APPEND_MONITOR % mon
+            subprocess.call(cmd)
 
 
-def get_number_of_monitors_connected():
+def get_monitors_connected():
     """
-    Gets the number of monitors connected to the computer
+    Gets the monitors connected to the computer
 
     Returns
     -------
-    int, number of monitors connected. For a laptop, this values is always >= 1
+
+    list of str, of monitors connected. For a laptop, this values is always
+    [eDP1 + ... ]
     """
     # Commands to execute
     xrandr_cmd = ('xrandr', '-q')
     grep_cmd = ('grep', '-w', 'connected')
-    wc_l_cmd = ('wc', '-l')
+    awk_cmd = ('awk', '\'{print $1}\'')
 
     # Start each command in a separate process and pipe each others
     # output/input. This is done in order to avoid using shell=True, in one
@@ -57,12 +70,13 @@ def get_number_of_monitors_connected():
     grep_proc = subprocess.Popen(grep_cmd,
                                  stdout=subprocess.PIPE,
                                  stdin=xrandr_proc.stdout)
-    output = subprocess.check_output(wc_l_cmd,
-                                     stdin=grep_proc.stdout)
-    # Strip the newline character appended to the command output
-    num_monitors = output.strip(b'\n')
-    # Cast from bytes to int, and return it
-    return int(num_monitors)
+    output_displays = subprocess.check_output(awk_cmd,
+                                              stdin=grep_proc.stdout)
+
+    # Strip the newline character appended at the end and convert the monitors
+    # ids into list of str
+    displays_str_array = output_displays.rstrip(b'\n').decode().split('\n')
+    return displays_str_array
 
 
 def check_monitors_change(action, device):
@@ -82,7 +96,7 @@ def check_monitors_change(action, device):
         Device on which the event happened
     """
     if action == 'change' and device.device_node.endswith('card0'):
-        adjust_monitor_xrandr(get_number_of_monitors_connected())
+        adjust_monitor_xrandr(get_monitors_connected())
 
 
 if __name__ == "__main__":
@@ -95,5 +109,5 @@ if __name__ == "__main__":
         observer.start()
         while True:
             time.sleep(1)
-    except Exception as e:
-        logging.error(e.with_traceback)
+    except Exception:
+        logging.exception('Something went wrong')
